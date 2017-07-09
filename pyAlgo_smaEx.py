@@ -42,10 +42,14 @@ class BBands(strategy.BacktestingStrategy):
 
         self.__execInfo =str(position.getEntryOrder().getAvgFillPrice()) + "," + side#, "***", position.getEntryOrder().getId()
 
+        #self.stopOrder(self.__instrument,)
         # self.info("EXECUTION at $%.6f :: %.6f" % (execInfo.getPrice(),position.getEntryOrder().getState() ))
         # self.__position.exitStop(execInfo.getPrice() * 0.95, True)
         #self.info(position.getEntryOrder())
 
+    def onOrderUpdated(self, order):
+        if order.isFilled():
+            order.getExecutionInfo().getPrice()
     def onExitOk(self, position):
         execInfo = position.getEntryOrder().getExecutionInfo()
         # print execInfo
@@ -88,10 +92,10 @@ class BBands(strategy.BacktestingStrategy):
 
         lower = self.__bbands_lower.getLowerBand()[-1]
         upper = self.__bbands_upper.getUpperBand()[-1]
-        if( lower== None or upper== None):
-            print("%s,%f,%f,%f,%f,,,," % (bar.getDateTime(),bar.getOpen(), bar.getHigh(), bar.getLow(), bar.getClose()))
-        else:
-            print("%s,%f,%f,%f,%f,%f,%f,%s" %(bar.getDateTime(),bar.getOpen(),bar.getHigh(),bar.getLow(),bar.getClose(),lower, upper, self.__execInfo))
+        #if( lower== None or upper== None):
+         #   print("%s,%f,%f,%f,%f,,,," % (bar.getDateTime(),bar.getOpen(), bar.getHigh(), bar.getLow(), bar.getClose()))
+        #else:
+            #print("%s,%f,%f,%f,%f,%f,%f,%s" %(bar.getDateTime(),bar.getOpen(),bar.getHigh(),bar.getLow(),bar.getClose(),lower, upper, self.__execInfo))
         # print("lower: %s" % lower)
         # shares = self.getBroker().getShares(self.__instrument)
 
@@ -168,14 +172,14 @@ def main(plot):
     start_time = time.time()  # taking current time as starting time
     strat.run()
     elapsed_time = time.time() - start_time
-    # print("Time elapsed: %.4f seconds" % elapsed_time)
+    print("Time elapsed: %.4f seconds" % elapsed_time)
 
-    #print("Sharpe ratio: %.4f" % sharpeRatioAnalyzer.getSharpeRatio(0.08))
-    #print "Final portfolio value: $%.2f" % strat.getBroker().getEquity()
+    print("Sharpe ratio: %.4f" % sharpeRatioAnalyzer.getSharpeRatio(0.008))
+    print "Final portfolio value: $%.2f" % strat.getBroker().getEquity()
 
     if plot:
         plt.plot()
 
 
 if __name__ == "__main__":
-    main(False)
+    main(True)
