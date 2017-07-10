@@ -10,7 +10,7 @@ Examples
 Input: PassedValues(NumericRef); 
 indicates that a numeric value is being passed into the function by reference through the Input PassedValues.
 
-================================================================================================
+========================================================================
 
 Return (Reserved Word)
  Disclaimer 
