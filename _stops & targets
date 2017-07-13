@@ -1,0 +1,62 @@
+{ Search Tag: WA-_Stops & Targets }
+
+{
+This general purpose exit strategy is also convenient for use with the other single-
+position "discretionary" strategies.  It makes available standard versions of all of 
+TradeStation's built-in stops and profit targets in one convenient grouping.
+
+This strategy is preferred over the _StpOrLim Ex strategy when a stop or profit 
+target is based on a price differential from the entry price instead of a 
+predetermined price point.  It also provides more choices - in addition to a simple 
+stop and profit target, it also provides a breakeven stop, 2 trailing stops, and an 
+end-of-day exit.  All these exits will always exit the entire position, and will 
+always apply to both long and short positions.
+
+The IntrabarOrderGeneration attribute is set to false in this strategy because the
+strategy is purely a "wrapper" for built-in stop reserved words, like SetStopLoss,
+which evaluate intrabar even when intrabar order generation is disabled.  Disabling
+intrabar order generation in this case prevents unnecessary computer processing.
+}
+
+[IntrabarOrderGeneration = false]
+
+inputs:
+	PositionBasis( false ) [DisplayName = "PositionBasis", ToolTip = 
+	 "Enter true if currency amounts (profit targets, stops, etc.) are for the entire position;  enter false if currency amounts are per share or per contract."],
+	ProfitTargetAmt( 5 ) [DisplayName = "ProfitTargetAmt", ToolTip = 
+	 "Profit Target Amount.  Enter the amount of the profit target.  Enter 0 for no profit target."],
+	StopLossAmt( 1 ) [DisplayName = "StopLossAmt", ToolTip = 
+	 "Stop Loss Amount.  Enter the amount of the stop loss.  Enter 0 for no stop loss."],
+	BreakevenFloorAmt( 0 ) [DisplayName = "BreakevenFloorAmt", ToolTip = 
+	 "Breakeven Floor Amount.  Enter amount of open profit required to activate breakeven stop."],
+	CurrencyTrailingAmt( 0 ) [DisplayName = "CurrencyTrailingAmt", ToolTip = 
+	 "Currency Trailing Amount.  Enter amount of currency trailing stop.  Enter 0 for no currency trailing stop."],
+	PctTrailingFloorAmt( 0 ) [DisplayName = "PctTrailingFloorAmt", ToolTip = 
+	 "Percent Trailing Floor Amount.  Enter amount of open profit required to activate percentage trailing stop.  Enter 0 for no percent trailing stop."],
+	PctTrailingPct( 0 ) [DisplayName = "PctTrailingPct", ToolTip = 
+	 "Percent Trailing Percent.  Enter percentage amount of percentage trailing stop.  Enter 0 for no trailing stop."],
+	ExitOnClose( 0 ) [DisplayName = "ExitOnClose", ToolTip = 
+	 "Enter one to force exit at end of day.  Enter zero to not force exit at end of day."];
+
+if PositionBasis then
+	SetStopPosition 
+else
+	SetStopShare;
+	
+if ProfitTargetAmt > 0 then
+	SetProfitTarget( ProfitTargetAmt );
+if StopLossAmt > 0 then
+	SetStopLoss( StopLossAmt );
+if BreakevenFloorAmt > 0 then
+	SetBreakeven( BreakevenFloorAmt );
+if CurrencyTrailingAmt > 0 then
+	SetDollarTrailing( CurrencyTrailingAmt );
+if PctTrailingFloorAmt > 0 and PctTrailingPct > 0 then 
+	SetPercentTrailing( PctTrailingFloorAmt, PctTrailingPct );
+if ExitOnClose = 1 then 
+	SetExitOnClose;
+
+
+{ ** Copyright © TradeStation Technologies, Inc.  All Rights Reserved ** 
+  ** TradeStation reserves the right to modify or overwrite this strategy component 
+     with each release. ** }
