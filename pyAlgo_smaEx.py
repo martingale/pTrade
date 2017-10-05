@@ -8,6 +8,71 @@ from pyalgotrade import broker
 from pyalgotrade.technical import cross
 
 import time
+class RowParser(csvfeed.RowParser):
+    def __init__(self):
+        self.__prevClose=None
+    def getFieldNames(self):
+        # It is expected for the first row to have the field names.
+        return None
+
+    def getDelimiter(self):
+        return ","
+
+    def parseBar(self, csvRowDict):
+
+        dateTime = datetime.datetime.strptime(csvRowDict["date_time"], "%Y-%m-%d %H:%M:%S.%f")
+        close= float(csvRowDict["price"])
+        if not self.__prevClose is None:
+            open=self.__prevClose
+        else:
+            open=close
+        volume = float(csvRowDict["quantity"])
+        high=max(close,open)
+        low = min(close, open)
+        thisbar=bar.BasicBar(dateTime, open, high, low, close, volume, close, None)
+        self.__prevClose=close
+
+        return thisbar
+
+        if timezone is None:
+            timezone = self.__timezone
+
+        rowParser = GenericRowParser(
+            self.__columnNames, self.__dateTimeFormat, self.getDailyBarTime(), self.getFrequency(),
+            timezone, self.__barClass
+        )
+
+        super(GenericBarFeed, self).addBarsFromCSV(instrument, path, rowParser)
+
+        if rowParser.barsHaveAdjClose():
+            self.__haveAdjClose = True
+        elif self.__haveAdjClose:
+            raise Exception("Previous bars had adjusted close and these ones don't have.")
+
+class Feed(csvfeed.BarFeed):
+    def __init__(self):
+        csvfeed.BarFeed.__init__(self, barfeed.Frequency.TRADE, maxLen=dataseries.DEFAULT_MAX_LEN)
+
+    def barsHaveAdjClose(self):
+        return False
+
+    def addBarsFromCSV(self, instrument, path,m):
+        rowParser = RowParser()
+        k = 0
+        loadedBars = []
+        reader = csvutils.FastDictReader(open(path, "r"), fieldnames=rowParser.getFieldNames(),
+                                         delimiter=rowParser.getDelimiter())
+        for row in reader:
+            k = k + 1
+            if k % m == 0:
+                bar_ = rowParser.parseBar(row)
+                if bar_ is not None:
+                    loadedBars.append(bar_)
+            else:
+                pass
+
+        self.addBarsFromSequence(instrument, loadedBars)
+
 
 class BBands(strategy.BacktestingStrategy):
     def __init__(self, feed, instrument, bBandsPeriod_upper,bBandsPeriod_lower):
