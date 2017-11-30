@@ -27,7 +27,11 @@ class RowParser(csvfeed.RowParser):
 
     def parseBar(self, csvRowDict):
 
-        dateTime = datetime.datetime.strptime(csvRowDict["Date Time"], "%Y-%m-%d %H:%M:%S")
+        #dateTime = datetime.datetime.strptime(csvRowDict["Date Time"], "%Y-%m-%d %H:%M:%S")
+        bar_date = datetime.datetime.strptime(csvRowDict["Date"], "%m/%d/%Y") #05/06/1998,00:00
+        bar_time = datetime.datetime.strptime(csvRowDict["Time"], "%H:%M") #05/06/1998,00:00
+
+        dateTime = datetime.datetime.combine(bar_date.date(), bar_time.time() )
         open = float(csvRowDict["Open"])
         high = float(csvRowDict["High"])
         low  = float(csvRowDict["Low"])
@@ -43,7 +47,7 @@ class RowParser(csvfeed.RowParser):
             ha_low  = min([low, ha_open])
             ha_high = max([high, ha_open])
 
-        ha_volume = float(csvRowDict["Volume"])
+        ha_volume = float(csvRowDict["Vol"])
         # high=max(close,open)
         # low = min(close, open)
         thisbar=bar.BasicBar(dateTime, ha_open, ha_high, ha_low, ha_close, ha_volume, ha_close, None)
@@ -242,7 +246,7 @@ def main(plot):
     feed=Feed()
     # feed= csvfeed.GenericBarFeed(bar.Frequency.HOUR)
     # feed1.setDateTimeFormat("%Y-%m-%d %H:%M:%S")
-    feed.addBarsFromCSV(instrument,"/Users/hrn/PycharmProjects/eurusd.csv",1)
+    feed.addBarsFromCSV(instrument,"/Users/hrn/PycharmProjects/pTrade/SPY_daily.txt",1)
 
     strat = BBands(feed, instrument, bBandsPeriod_upper,bBandsPeriod_lower)
     sharpeRatioAnalyzer = sharpe.SharpeRatio()
