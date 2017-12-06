@@ -246,9 +246,9 @@ def main(plot):
     feed=Feed()
     # feed= csvfeed.GenericBarFeed(bar.Frequency.HOUR)
     # feed1.setDateTimeFormat("%Y-%m-%d %H:%M:%S")
-    feed.addBarsFromCSV(instrument,"/Users/hrn/PycharmProjects/pTrade/SPY_daily.txt",1)
+    feed.addBarsFromCSV(instrument, "SPY_daily.txt", 1)
 
-    strat = BBands(feed, instrument, bBandsPeriod_upper,bBandsPeriod_lower)
+    strat = BBands(feed, instrument, bBandsPeriod_upper, bBandsPeriod_lower)
     sharpeRatioAnalyzer = sharpe.SharpeRatio()
     strat.attachAnalyzer(sharpeRatioAnalyzer)
 

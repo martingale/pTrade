@@ -13,14 +13,16 @@ from pyalgotrade.stratanalyzer import trades
 
 
 import datetime
-import csv
+# import csv
 from joblib import Parallel, delayed
 from pyalgotrade.utils import csvutils
 
 
 class RowParser(csvfeed.RowParser):
     def __init__(self):
-        self.__prevClose=None
+        self.__prevClose = None
+        self.__tradeprices = None
+
     def getFieldNames(self):
         # It is expected for the first row to have the field names.
         return None
@@ -31,16 +33,16 @@ class RowParser(csvfeed.RowParser):
     def parseBar(self, csvRowDict):
 
         dateTime = datetime.datetime.strptime(csvRowDict["date_time"], "%Y-%m-%d %H:%M:%S.%f")
-        close= float(csvRowDict["price"])
-        if not self.__prevClose is None:
-            open=self.__prevClose
+        close = float(csvRowDict["price"])
+        if self.__prevClose is not None:
+            open = self.__prevClose
         else:
-            open=close
+            open = close
         volume = float(csvRowDict["quantity"])
-        high=max(close,open)
+        high = max(close, open)
         low = min(close, open)
-        thisbar=bar.BasicBar(dateTime, open, high, low, close, volume, close, None)
-        self.__prevClose=close
+        thisbar = bar.BasicBar(dateTime, open, high, low, close, volume, close, None)
+        self.__prevClose = close
 
         return thisbar
 
@@ -59,6 +61,7 @@ class RowParser(csvfeed.RowParser):
         elif self.__haveAdjClose:
             raise Exception("Previous bars had adjusted close and these ones don't have.")
 
+
 class Feed(csvfeed.BarFeed):
     def __init__(self):
         csvfeed.BarFeed.__init__(self, barfeed.Frequency.TRADE, maxLen=dataseries.DEFAULT_MAX_LEN)
@@ -66,7 +69,7 @@ class Feed(csvfeed.BarFeed):
     def barsHaveAdjClose(self):
         return False
 
-    def addBarsFromCSV(self, instrument, path,m):
+    def addBarsFromCSV(self, instrument, path, m):
         rowParser = RowParser()
         k = 0
         loadedBars = []
@@ -88,7 +91,8 @@ class SMACrossOver(strategy.BacktestingStrategy):
     def __init__(self, feed, instrument, smaPeriod):
         super(SMACrossOver, self).__init__(feed)
         self.__instrument = instrument
-        self.__position = None
+        self.__longposition = None
+        self.__shortposition = None
         # We'll use adjusted close values instead of regular close values.
         # self.setUseAdjustedValues(False)
         self.__prices = feed[instrument].getPriceDataSeries()
@@ -99,49 +103,82 @@ class SMACrossOver(strategy.BacktestingStrategy):
         return self.__sma
 
     def onEnterCanceled(self, position):
-        self.__position = None
+        if self.__longposition == position:
+            self.__longposition = None
+        elif self.__shortposition == position:
+            self.__shortposition = None
+        else:
+            assert False
 
     def onExitOk(self, position):
-        self.__position = None
-        self.__execInfo = str(position.getExitOrder().getAvgFillPrice()) + "," +str(self.__sma[-1])+ ", SELL\n"   # , "***", position.getEntryOrder().getId()
-        # self.info(position.getEntryOrder())
-        self.info(self.__execInfo)
+        if self.__longposition == position:
+            self.__longposition = None
+            self.__execInfo = str(position.getExitOrder().getAvgFillPrice()) + "," + str(self.__sma[-1]) + ", LX\n"
+            self.info(self.__execInfo)
+        elif self.__shortposition == position:
+            self.__shortposition = None
+            self.__execInfo = str(position.getExitOrder().getAvgFillPrice()) + "," + str(self.__sma[-1]) + ", SX\n"
+            self.info(self.__execInfo)
+        else:
+            assert False
+
+
     def onExitCanceled(self, position):
         # If the exit was canceled, re-submit it.
-        self.__position.exitMarket()
+        if self.__longposition == position:
+            self.__longposition.exitMarket()
+        elif self.__shortposition == position:
+            self.__shortposition.exitMarket()
+        else:
+            assert False
+
     def onEnterOk(self, position):
         # self.__execInfo = position.getEntryOrder().getExecutionInfo()
         if position.getEntryOrder().isBuy():
-            side = "BUY"
+            side = "LE"
         else:
-            side = "SELL"
+            side = "SE"
 
-        self.__execInfo = str(position.getEntryOrder().getAvgFillPrice()) + "," +str(self.__sma[-1])+", "+ side + " " +\
-                          str(position.getEntryOrder().getFilled()) # , "***", position.getEntryOrder().getId()
+        self.__execInfo = str(position.getEntryOrder().getAvgFillPrice()) + "," +str(self.__sma[-1])+", "+ side + " " \
+                          + str(position.getEntryOrder().getFilled())  # , "***", position.getEntryOrder().getId()
         # self.info(position.getEntryOrder())
         self.info(self.__execInfo)
         # self.info(position.getEntryOrder().getExecutionInfo())
+
+    def enterLongSignal(self):
+        cond = self.__prices[-1] < (self.__sma[-1] * .995)
+        return cond
+
+    def enterShortSignal(self):
+        cond = self.__prices[-1] > (self.__sma[-1] * 1.005)
+        return cond
+
     def onBars(self, bars):
         # If a position was not opened, check if we should enter a long position.
-        if self.__position is None:
-            if self.__sma[-1] is not None and self.__prices[-1]< (self.__sma[-1] - .01) :
-                shares=100000
-                shares = int(.9 * self.getBroker().getCash()  / bars[self.__instrument].getPrice())
-                # Enter a buy market order. The order is good till canceled.
-                self.__position = self.enterLong(self.__instrument, shares, True)
-                 # Check if we have to exit the position.
-        elif not self.__position.exitActive() and cross.cross_above(self.__prices, self.__sma) > 0:
-            #self.info("ciktik\n")
-            self.__position.exitMarket()
-        bar = bars[self.__instrument]
         if self.__sma[-1] is None:
-            smaLast=0
-        else:
-            smaLast=self.__sma[-1]
-        #print("%s,%f,%f,%f,%f,%f" % (bar.getDateTime(), bar.getOpen(), bar.getHigh(), bar.getLow(), bar.getClose(),smaLast))
+            return
 
-        info=str(bar.getOpen())+ "-" + str(bar.getHigh())+ "-" + str(bar.getLow())+"-"+ str(bar.getClose())+ "-"+str(smaLast)
+        if self.__longposition is None:
+            if self.enterLongSignal():
+                shares = int(.5 * self.getBroker().getCash() / bars[self.__instrument].getPrice())
+                self.__longposition = self.enterLong(self.__instrument, shares, True)
+        elif not self.__longposition.exitActive() and cross.cross_above(self.__prices, self.__sma):
+            self.__longposition.exitMarket()
+
+        if self.__shortposition is None:
+            if self.enterShortSignal():
+                shares = int(.5 * self.getBroker().getCash() / bars[self.__instrument].getPrice())
+                self.__shortposition = self.enterShort(self.__instrument, shares, True)
+        elif not self.__shortposition.exitActive() and cross.cross_below(self.__prices, self.__sma):
+            self.__shortposition.exitMarket()
+
+        recent_bar = bars[self.__instrument]
+
+        info = str(recent_bar.getOpen()) + "-" + str(recent_bar.getHigh()) + "-" + str(recent_bar.getLow()) + "-" \
+               + str(recent_bar.getClose()) + "-" + str(self.__sma[-1])
         self.info(info)
+
+
 def runAllStrat(m, k):
     instrument = "garan"
     feed = Feed()
@@ -156,20 +193,21 @@ def runAllStrat(m, k):
     strat.run()
     print "# of trades:%i\n" % (tradesAnalyzer.getCount())
 
-    print "%i,%i....Final portfolio value: $%.2f:" % (m,k,strat.getBroker().getEquity())
+    print "%i,%i....Final portfolio value: $%.2f:" % (m, k, strat.getBroker().getEquity())
     return strat.getBroker().getEquity()
 
-def main():
-    nticks=range(5, 100 + 1, 1)
-    nsma=range(100, 500 + 1, 5)
-    #data = Parallel(n_jobs=16)(delayed(runAllStrat)(m=i, k=j) for i in nticks for j in nsma)
-    data = Parallel(n_jobs=1)(delayed(runAllStrat)(m=i, k=j) for i in range(80, 81,1) for j in range(100, 101,1))
 
-    data= np.matrix(data)
-    nrow=len(nticks)
-    ncol= len(nsma)
-    data=np.resize(data,(nrow,ncol))
-    data=pd.DataFrame(data)
+def main():
+    nticks = range(5, 100 + 1, 1)
+    nsma = range(100, 500 + 1, 5)
+    # data = Parallel(n_jobs=16)(delayed(runAllStrat)(m=i, k=j) for i in nticks for j in nsma)
+    data = Parallel(n_jobs=1)(delayed(runAllStrat)(m=i, k=j) for i in range(80, 81, 1) for j in range(100, 101, 1))
+
+    data = np.matrix(data)
+    nrow = len(nticks)
+    ncol = len(nsma)
+    data = np.resize(data,(nrow,ncol))
+    data = pd.DataFrame(data)
     # data.columns=nticks
     # data.index=nsma
     # data.to_csv("outJunl.csv",index_label = 'n_ticks|n_ma')
@@ -177,6 +215,7 @@ def main():
 #    with open('outJunk.csv', 'w') as out:
 #       writer = csv.writer(out)
 #      writer.writerow(data)
+
 
 if __name__ == "__main__":
     main()
