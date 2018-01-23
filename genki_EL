@@ -1,0 +1,77 @@
+Inputs:
+	MinCompBars(0),
+	MaxCompBars(6);
+
+Vars:
+	haClose(0),
+	haOpen(0),
+    haMinDir(0),
+	haMaxDir(0),
+	Color(0);
+
+{ Get HA Direction for Min/Max Compare Bars }
+haMinDir = BarTrendHA(MinCompBars, haOpen, haClose);
+haMaxDir = BarTrendHA(MaxCompBars, haOpen, haClose);
+
+{ Load Display Color }
+if haMinDir = 1 and haMaxDir = 1 then
+Buy ( "Buy" ) next bar at market ;
+
+if haMinDir = 2 and haMaxDir = 2 then
+Sell Short( "Sell" ) next bar at market ;
+
+================================================
+================FUNCTION BarTrendHA================
+================================================
+
+
+Inputs:
+   CompBars(numericsimple),
+   oOpenVal(numericref),   {Output: HA Open Price}
+   oCloseVal(numericref);   {Output: HA Close Price}
+
+
+Vars:
+   haClose(0),
+   haOpen(0),
+   haHigh(0),
+   haLow(0),
+   Index(0),
+   UpVal(1),   {Constant: Up haDir value}
+   DownVal(2), {Constant: Down haDir value}
+   Return(0);
+
+if BarNumber = 1 then
+ begin
+  haOpen = open;
+  haClose = (O+H+L+C)/4;
+  haHigh = MaxList( high, haOpen, haClose);
+  haLow = MinList( low, haOpen, haClose);
+ end
+else //BarNumber > 1
+ begin
+  haOpen = (haOpen[1] + haClose[1])/2 ;		//Average of open and close of the PREVIOUS bar
+  haClose = (O+H+L+C)/4;
+  haHigh = MaxList(High, haOpen, haClose) ;
+  haLow = MinList(Low, haOpen, haClose) ;
+
+if haClose > haOpen then
+ Return = UpVal
+else
+ Return = DownVal;
+
+for Index = 1 to CompBars
+ begin
+  if haOpen <= MaxList(haOpen[Index],haClose[Index]) and
+     haOpen >= MinList(haOpen[Index],haClose[Index]) and
+     haClose <= MaxList(haOpen[Index],haClose[Index]) and
+     haClose >= MinList(haOpen[Index],haClose[Index]) then
+   Return = Return[Index];
+  end;
+
+end;
+
+{Load Output Values}
+oOpenVal = haOpen;
+oCloseVal = haClose;
+BarTrendHA = Return;
