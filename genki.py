@@ -1,8 +1,10 @@
 from pyalgotrade import strategy
 from pyalgotrade import plotter
 from pyalgotrade import dataseries
+from pyalgotrade import technical
 from pyalgotrade.barfeed import csvfeed
 from pyalgotrade.technical import bollinger
+from pyalgotrade.technical import ma
 from pyalgotrade.stratanalyzer import sharpe
 from pyalgotrade import bar
 from pyalgotrade import barfeed
@@ -11,13 +13,15 @@ from pyalgotrade import broker
 from pyalgotrade.technical import cross
 from pyalgotrade.utils import csvutils
 import datetime
-
-
 import time
-class RowParser(csvfeed.RowParser):
+import HA as ha
+
+
+class RowParserHA(csvfeed.RowParser):
     def __init__(self):
-        self.__prevClose=None
+        self.__prevClose = None
         self.__prevOpen = None
+
     def getFieldNames(self):
         # It is expected for the first row to have the field names.
         return None
@@ -28,235 +32,184 @@ class RowParser(csvfeed.RowParser):
     def parseBar(self, csvRowDict):
 
         #dateTime = datetime.datetime.strptime(csvRowDict["Date Time"], "%Y-%m-%d %H:%M:%S")
-        bar_date = datetime.datetime.strptime(csvRowDict["Date"], "%m/%d/%Y") #05/06/1998,00:00
+        bar_date = datetime.datetime.strptime(csvRowDict["Date"], "%d.%m.%Y") #05/06/1998,00:00
         bar_time = datetime.datetime.strptime(csvRowDict["Time"], "%H:%M") #05/06/1998,00:00
 
         dateTime = datetime.datetime.combine(bar_date.date(), bar_time.time() )
         open = float(csvRowDict["Open"])
         high = float(csvRowDict["High"])
-        low  = float(csvRowDict["Low"])
+        low = float(csvRowDict["Low"])
         close = float(csvRowDict["Close"])
-        ha_close= sum([open,high,low,close]) / 4.0
+        ha_close = sum([open, high, low, close]) / 4.0
 
         if self.__prevClose is None and self.__prevOpen is None:
-            ha_open= (open+close )/2.0
-            ha_low=low
-            ha_high=high
+            ha_open = (open + close)/2.0
+            ha_low = low
+            ha_high = high
         else:
-            ha_open=(self.__prevOpen + self.__prevClose)/2.0
-            ha_low  = min([low, ha_open])
-            ha_high = max([high, ha_open])
+            ha_open = (self.__prevOpen + self.__prevClose)/2.0
+            ha_low  = min([low, ha_open, ha_close])
+            ha_high = max([high, ha_open, ha_close])
 
         ha_volume = float(csvRowDict["Vol"])
-        # high=max(close,open)
-        # low = min(close, open)
-        thisbar=bar.BasicBar(dateTime, ha_open, ha_high, ha_low, ha_close, ha_volume, ha_close, None)
+        ha_bar = bar.BasicBar(dateTime, ha_open, ha_high, ha_low, ha_close, ha_volume, ha_close, None)
+        bar_ = bar.BasicBar(dateTime, open, high, low, close, ha_volume, close, None)
         self.__prevClose = ha_close
         self.__prevOpen = ha_open
 
-        return thisbar
+        return bar_, ha_bar
 
-        if timezone is None:
-            timezone = self.__timezone
 
-        rowParser = GenericRowParser(
-            self.__columnNames, self.__dateTimeFormat, self.getDailyBarTime(), self.getFrequency(),
-            timezone, self.__barClass
-        )
-
-        super(GenericBarFeed, self).addBarsFromCSV(instrument, path, rowParser)
-
-        if rowParser.barsHaveAdjClose():
-            self.__haveAdjClose = True
-        elif self.__haveAdjClose:
-            raise Exception("Previous bars had adjusted close and these ones don't have.")
-
-class Feed(csvfeed.BarFeed):
+class GenkiBars(csvfeed.BarFeed):
     def __init__(self):
         csvfeed.BarFeed.__init__(self, barfeed.Frequency.TRADE, maxLen=dataseries.DEFAULT_MAX_LEN)
 
     def barsHaveAdjClose(self):
         return False
 
-    def addBarsFromCSV(self, instrument, path,m):
-        rowParser = RowParser()
-        k = 0
-        loadedBars = []
-        reader = csvutils.FastDictReader(open(path, "r"), fieldnames=rowParser.getFieldNames(),
-                                         delimiter=rowParser.getDelimiter())
+    def addBarsFromCSV(self, instrument, path, row_parser):
+        row_parser = RowParserHA()
+        loaded_genki = []
+        loaded_bars = []
+        reader = csvutils.FastDictReader(open(path, "r"), fieldnames=row_parser.getFieldNames(),
+                                         delimiter=row_parser.getDelimiter())
         for row in reader:
-            k = k + 1
-            if k % m == 0:
-                bar_ = rowParser.parseBar(row)
-                if bar_ is not None:
-                    loadedBars.append(bar_)
+            bar_, bar_genki = row_parser.parseBar(row)
+            if bar_genki is not None and bar_ is not None:
+                loaded_genki.append(bar_genki)
+                loaded_bars.append(bar_)
             else:
                 pass
 
-        self.addBarsFromSequence(instrument, loadedBars)
+        self.addBarsFromSequence(instrument, loaded_bars)
+        self.addBarsFromSequence(instrument+'genki', loaded_genki)
 
 
-class BBands(strategy.BacktestingStrategy):
-    def __init__(self, feed, instrument, bBandsPeriod_upper,bBandsPeriod_lower):
-        super(BBands, self).__init__(feed)
-        # strategy.BacktestingStrategy.__init__(self, feed)
+class GenkiStrategy(strategy.BacktestingStrategy):
+    def __init__(self, feed, instrument, min_compare_bars=1, max_compare_bars=6):
+        super(GenkiStrategy, self).__init__(feed)
         self.__instrument = instrument
-        self.__prices = feed[instrument].getPriceDataSeries()
-        self.__bbands_upper = bollinger.BollingerBands(self.__prices, bBandsPeriod_upper, 2.8,2)
-        self.__bbands_lower = bollinger.BollingerBands(self.__prices, bBandsPeriod_lower, 3.2,2)
-        self.__positionLong = None
-        self.__positionShort = None
+        self.__genki = instrument + 'genki'
+        self.__prices = feed[instrument]
+        self.__ha = feed[self.__genki]
+        self.__min_ha = ha.HADir(self.__ha, min_compare_bars)
+        self.__max_ha = ha.HADir(self.__ha, max_compare_bars)
+        self.__sma = ma.SMA(feed[instrument].getPriceDataSeries(), 14)
+        self.__longposition = None
+        self.__shortposition = None
         self.__position = None
-        self.__State=0
-        self.__criteria=None
+        self.__State = 0
+        self.__criteria = None
         self.__t = None
-        self.getBroker().setAllowNegativeCash(True)
+        # self.getBroker().setAllowNegativeCash(True)
         self.__execInfo = "0,0"
-
-    @property
-    def getBollingerBands_upper(self):
-        return self.__bbands_upper
-    @property
-    def getBollingerBands_lower(self):
-        return self.__bbands_lower
-
-    def onEnterOk(self, position):
-        self.__execInfo = position.getEntryOrder().getExecutionInfo()
-        if position.getEntryOrder().isBuy():
-            side="BUY"
-        else:
-            side="SELL"
-
-        self.__execInfo =str(position.getEntryOrder().getAvgFillPrice()) + "," + side#, "***", position.getEntryOrder().getId()
-
-        #self.stopOrder(self.__instrument,)
-        # self.info("EXECUTION at $%.6f :: %.6f" % (execInfo.getPrice(),position.getEntryOrder().getState() ))
-        # self.__position.exitStop(execInfo.getPrice() * 0.95, True)
-        #self.info(position.getEntryOrder())
-
-    def onOrderUpdated(self, order):
-        if order.isFilled():
-            order.getExecutionInfo().getPrice()
-    def onExitOk(self, position):
-        execInfo = position.getEntryOrder().getExecutionInfo()
-        # print execInfo
-        # self.info("SELL at $%.6f" % (execInfo.getPrice()))
-        # self.__position.exitStop(execInfo.getPrice() * 0.95, True)
-
-    # def onExitCanceled(self, position):
-    #     # If the exit was canceled, re-submit it.
-    #     self.__position.exitMarket()
-
-
 
     def onEnterCanceled(self, position):
-        self.__positionLong = None
-        self.__positionShort = None
-    # def onExitCanceled(self, position):
-    #     self.__positionLong = None
-    #     self.__positionShort = None
+        if self.__longposition == position:
+            self.__longposition = None
+        elif self.__shortposition == position:
+            self.__shortposition = None
+        else:
+            assert False
+
+    def onExitOk(self, position):
+        if self.__longposition == position:
+            self.__longposition = None
+            self.__execInfo = str(position.getExitOrder().getAvgFillPrice()) + ", LX\n"
+            self.info(self.__execInfo)
+        elif self.__shortposition == position:
+            self.__shortposition = None
+            self.__execInfo = str(position.getExitOrder().getAvgFillPrice()) + ", SX\n"
+            self.info(self.__execInfo)
+        else:
+            assert False
+
+
+    def onExitCanceled(self, position):
+        # If the exit was canceled, re-submit it.
+        if self.__longposition == position:
+            self.__longposition.exitMarket()
+        elif self.__shortposition == position:
+            self.__shortposition.exitMarket()
+        else:
+            assert False
+
+    def onEnterOk(self, position):
+        # self.__execInfo = position.getEntryOrder().getExecutionInfo()
+        if position.getEntryOrder().isBuy():
+            side = "LE"
+        else:
+            side = "SE"
+
+        self.__execInfo = str(position.getEntryOrder().getAvgFillPrice()) + "," + side + " " \
+        #                   + str(position.getEntryOrder().getFilled())  # , "***", position.getEntryOrder().getId()
+        #self.info(position.getEntryOrder())
+        self.info(self.__execInfo)
+        # self.info(position.getEntryOrder().getExecutionInfo())
+
+    def enterLongSignal(self):
+        cond = self.__min_ha[-1][0] == 1 and self.__max_ha[-1][0] == 1
+        return cond
+
+    def enterShortSignal(self):
+        cond = self.__min_ha[-1][0] == -1 and self.__max_ha[-1][0] == -1
+        return cond
 
     def onBars(self, bars):
-        bar = bars[self.__instrument]
-    # State 0: Nothing happened at the previous bar
-    #       1: Crossed below the lower Bollinger band at the previous bar
-    #       2: Crossed above the upper Bollinger band at the previous bar
-        if not len(self.getBroker().getPositions()) == 0:
-            carry = self.getBroker().getPositions()[self.__instrument]
-        else:
-            carry = 0
-        if not self.__positionLong is None:
-            # self.info(self.__positionLong.getAge().seconds)
-            self.__positionLong.cancelEntry()
-            self.__positionLong = None
-            # self.__positionLong.exitMarket()
-        if not self.__positionShort is None :
-            # self.info( self.__positionShort.getAge().seconds)
-            self.__positionShort.cancelEntry()
-            self.__positionShort = None
-            #self.__positionShort.exitMarket()
-            self.__positionShort=None
+        # bar = bars[self.__instrument]
+        barG = bars[self.__genki]
 
-        lower = self.__bbands_lower.getLowerBand()[-1]
-        upper = self.__bbands_upper.getUpperBand()[-1]
-        #if( lower== None or upper== None):
-        print("%s,%f,%f,%f,%f,,,," % (bar.getDateTime(),bar.getOpen(), bar.getHigh(), bar.getLow(), bar.getClose()))
-        #else:
-            #print("%s,%f,%f,%f,%f,%f,%f,%s" %(bar.getDateTime(),bar.getOpen(),bar.getHigh(),bar.getLow(),bar.getClose(),lower, upper, self.__execInfo))
-        # print("lower: %s" % lower)
-        # shares = self.getBroker().getShares(self.__instrument)
+        if self.__min_ha[-1][0] is None or self.__max_ha[-1][0] is None:
+            return
 
+        state = 0
+        if self.enterLongSignal():
+            state = 1
+        elif self.enterShortSignal():
+            state = -1
 
-        baseshare = 300000
+        self.info((str(barG.getDateTime()) + ', ' + "%.2f" % barG.getOpen() + ', ' + "%.2f" % barG.getClose() +
+                   ', ' + str(state) + ', ' + str(self.__min_ha[-1]) + str(self.__max_ha[-1])))
+        # self.info((str(barG.getDateTime()) + ', ' + str(self.__min_ha[-1]) + str(self.__max_ha[-1])))
 
-        State = self.__State
-        # print self.__bbands_lower.getLowerBand()[-1],self.__bbands_lower.getLowerBand()[0],self.__bbands_upper.getUpperBand()[-1],self.__bbands_upper.getUpperBand()[0]
-        if State==0:
-            if cross.cross_above(self.__prices, self.__bbands_lower.getLowerBand()):
-                State = 1
-                self.__criteria=lower
-                #self.info("Bolingeri asagidan kirdi (%.4f > %.4f). "
-                #          "Bar range: %.4f - %.4f "
-                #          % (self.__prices[-1], lower,bar.getLow(), bar.getHigh()))
-            elif cross.cross_below(self.__prices, self.__bbands_upper.getUpperBand()):
-                State=2
-                self.__criteria=upper
-        if State==1:
-            self.__State = 0
-        # if bar.getClose() > self.__criteria and bar.getLow() < self.__criteria:
-            # print cross.cross_above(self.__prices, self.__bbands_lower.getLowerBand())
-            #self.__positionLong = self.enterLong(self.__instrument, sharesToBuy, True)
-            self.__positionLong = self.enterLongStop(self.__instrument,self.__criteria, baseshare+abs(min(0,carry)), False)
-            #self.info("%i Buy order @$%.6f. Cash: %s " % (baseshare, lower, self.getBroker().getPositions()))
-            #self.info("Order ID %i:" % self.__positionLong.getEntryOrder().getId())
-        elif State==2:
-            self.__State = 0
-            #if bar.getClose() < self.__criteria:
-            # if cross.cross_below(self.__prices, self.__bbands_lower.getUpperBand()) > 0:
-            self.__positionShort = self.enterShortStop(self.__instrument,self.__criteria,baseshare+abs(max(0, carry)),False)
-            #self.info(" Sell %dK @$%.6f. Cash: %s. Order ID: %i " %
-            #          (baseshare/1000, upper, self.getBroker().getPositions(),self.__positionShort.getEntryOrder().getId() )
-            #          )
-        self.__execInfo = "0,0"
+        shares = int(50000 / bars[self.__instrument].getPrice())
+        if self.__longposition is None and self.__shortposition is None:
+            if self.enterLongSignal():
+                self.__longposition = self.enterLong(self.__instrument, shares, True)
+            elif self.enterShortSignal():
+                self.__shortposition = self.enterShort(self.__instrument, shares, True)
+        elif self.__longposition is None:
+            if self.enterLongSignal():
+                if not self.__shortposition.exitActive():
+                    self.__shortposition.exitMarket()
+                self.__longposition = self.enterLong(self.__instrument, shares, True)
+        elif self.__shortposition is None:
+            if self.enterShortSignal():
+                if not self.__longposition.exitActive():
+                    self.__longposition.exitMarket()
+                self.__shortposition = self.enterShort(self.__instrument, shares, True)
 
 
-            #
-        #     if not self.__positionShort == None:
-        #         if not self.__positionShort.exitActive():
-        #             self.__positionShort.exitMarket()
-        #
-        #     sharesToBuy = int(baseshare)
-        #     self.__positionLong = self.enterLong(self.__instrument,sharesToBuy, True)
-        #     self.info("%i Buy order @$%.6f . Cash: %s " % (sharesToBuy, lower,self.getBroker().getCash(False)))
-        #
-        # elif cross.cross_above(self.__prices, self.__bbands_upper.getUpperBand()) > 0:
-        #     if not self.__positionLong == None:
-        #         if not self.__positionLong.exitActive():
-        #             self.__positionLong.exitMarket()
-        #
-        #     sharesToBuy = int(baseshare)
-        #     self.__positionShort = self.enterShort(self.__instrument,sharesToBuy,True)
-        #     self.info("%i Sell order @$%.6f . Cash: %s " % (sharesToBuy, upper,self.getBroker().getCash(True)))
 def main(plot):
     instrument = "eurusd"
-    bBandsPeriod_upper = 40
-    bBandsPeriod_lower = 20
+    min_compare_bars = 1
+    max_compare_bars = 10
 
     # Download the bars.
-    feed=Feed()
+    genki_bars = GenkiBars()
     # feed= csvfeed.GenericBarFeed(bar.Frequency.HOUR)
     # feed1.setDateTimeFormat("%Y-%m-%d %H:%M:%S")
-    feed.addBarsFromCSV(instrument, "SPY_daily.txt", 1)
+    genki_bars.addBarsFromCSV(instrument, "SPY_daily_new.txt", RowParserHA)
 
-    strat = BBands(feed, instrument, bBandsPeriod_upper, bBandsPeriod_lower)
+    strat = GenkiStrategy(genki_bars, instrument, min_compare_bars, max_compare_bars)
     sharpeRatioAnalyzer = sharpe.SharpeRatio()
     strat.attachAnalyzer(sharpeRatioAnalyzer)
 
     if plot:
         plt = plotter.StrategyPlotter(strat, True, True, True)
-        plt.getInstrumentSubplot(instrument).addDataSeries("upper", strat.getBollingerBands_upper.getUpperBand())
+        # plt.getInstrumentSubplot(instrument).addDataSeries("upper", strat.getBollingerBands_upper.getUpperBand())
         # plt.getInstrumentSubplot(instrument).addDataSeries("middle", strat.getBollingerBands().getMiddleBand())
-        plt.getInstrumentSubplot(instrument).addDataSeries("lower", strat.getBollingerBands_lower.getLowerBand())
+        # plt.getInstrumentSubplot(instrument).addDataSeries("lower", strat.getBollingerBands_lower.getLowerBand())
     start_time = time.time()  # taking current time as starting time
     strat.run()
     elapsed_time = time.time() - start_time

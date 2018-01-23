@@ -12,8 +12,8 @@ from pyalgotrade.stratanalyzer import sharpe
 from pyalgotrade.stratanalyzer import trades
 
 
-import datetime
-# import csv
+from datetime import datetime
+import time
 from joblib import Parallel, delayed
 from pyalgotrade.utils import csvutils
 
@@ -21,7 +21,9 @@ from pyalgotrade.utils import csvutils
 class RowParser(csvfeed.RowParser):
     def __init__(self):
         self.__prevClose = None
-        self.__tradeprices = None
+        self.__tradeprices = []
+        self.__lasttimestamp = None
+        self.__volume = None
 
     def getFieldNames(self):
         # It is expected for the first row to have the field names.
@@ -30,36 +32,55 @@ class RowParser(csvfeed.RowParser):
     def getDelimiter(self):
         return ","
 
-    def parseBar(self, csvRowDict):
-
-        dateTime = datetime.datetime.strptime(csvRowDict["date_time"], "%Y-%m-%d %H:%M:%S.%f")
-        close = float(csvRowDict["price"])
-        if self.__prevClose is not None:
-            open = self.__prevClose
+    def parseBar(self, csvRowDict, bar_period):
+        timestamp = datetime.strptime(csvRowDict["date_time"], "%Y-%m-%d %H:%M:%S.%f")
+        volume = 10000000
+        isnew = False
+        if self.__lasttimestamp is None:
+            isnew = True
         else:
-            open = close
-        volume = float(csvRowDict["quantity"])
-        high = max(close, open)
-        low = min(close, open)
-        thisbar = bar.BasicBar(dateTime, open, high, low, close, volume, close, None)
-        self.__prevClose = close
+            d1_ts = time.mktime(timestamp.timetuple())
+            d2_ts = time.mktime(self.__lasttimestamp.timetuple())
+            cond1 = (d1_ts % (bar_period * 60)) - (d2_ts % (bar_period * 60)) < 0
+            cond2 = timestamp.minute != self.__lasttimestamp.minute
+            if cond1 and cond2:
+                isnew = True
+                self.__tradeprices = []
 
-        return thisbar
+        self.__tradeprices.append(float(csvRowDict["price"]))
 
-        if timezone is None:
-            timezone = self.__timezone
+        open = self.__tradeprices[0]
+        high = max(self.__tradeprices)
+        low = min(self.__tradeprices)
+        close = self.__tradeprices[-1]
+        self.__lasttimestamp = timestamp
 
-        rowParser = GenericRowParser(
-            self.__columnNames, self.__dateTimeFormat, self.getDailyBarTime(), self.getFrequency(),
-            timezone, self.__barClass
-        )
+        # if self.__prevClose is not None:
+        #     open = self.__prevClose
+        # else:
+        #     open = close
+        # volume = float(csvRowDict["quantity"])
+        # high = max(close, open)
+        # low = min(close, open)
+        thisbar = bar.BasicBar(timestamp, open, high, low, close, volume, close, None)
+        # self.__prevClose = close
 
-        super(GenericBarFeed, self).addBarsFromCSV(instrument, path, rowParser)
+        return thisbar, isnew
 
-        if rowParser.barsHaveAdjClose():
-            self.__haveAdjClose = True
-        elif self.__haveAdjClose:
-            raise Exception("Previous bars had adjusted close and these ones don't have.")
+        # if timezone is None:
+        #     timezone = self.__timezone
+        #
+        # rowParser = GenericRowParser(
+        #     self.__columnNames, self.__dateTimeFormat, self.getDailyBarTime(), self.getFrequency(),
+        #     timezone, self.__barClass
+        # )
+        #
+        # super(GenericBarFeed, self).addBarsFromCSV(instrument, path, rowParser)
+        #
+        # if rowParser.barsHaveAdjClose():
+        #     self.__haveAdjClose = True
+        # elif self.__haveAdjClose:
+        #     raise Exception("Previous bars had adjusted close and these ones don't have.")
 
 
 class Feed(csvfeed.BarFeed):
@@ -69,22 +90,29 @@ class Feed(csvfeed.BarFeed):
     def barsHaveAdjClose(self):
         return False
 
-    def addBarsFromCSV(self, instrument, path, m):
+    def addBarsFromCSV(self, instrument, path, m, bar_period):
         rowParser = RowParser()
-        k = 0
+        # k = 0
         loadedBars = []
         reader = csvutils.FastDictReader(open(path, "r"), fieldnames=rowParser.getFieldNames(),
                                          delimiter=rowParser.getDelimiter())
+        # for row in reader:
+        #     k = k + 1
+        #     if k % m == 0:
+        #         bar_ = rowParser.parseBar(row, bar_period)
+        #         if bar_ is not None:
+        #             loadedBars.append(bar_)
+        #     else:
+        #         pass
         for row in reader:
-            k = k + 1
-            if k % m == 0:
-                bar_ = rowParser.parseBar(row)
-                if bar_ is not None:
-                    loadedBars.append(bar_)
-            else:
-                pass
+            bar_, isnew = rowParser.parseBar(row, bar_period)
+            # if not isnew:
+                # loadedBars.pop()
+
+            loadedBars.append(bar_)
 
         self.addBarsFromSequence(instrument, loadedBars)
+        super(Feed, self).addBarsFromCSV(instrument, path, rowParser)
 
 
 class SMACrossOver(strategy.BacktestingStrategy):
@@ -154,6 +182,7 @@ class SMACrossOver(strategy.BacktestingStrategy):
         return cond
 
     def onBars(self, bars):
+        self.info(bars[self.__instrument].getDateTime())
         # If a position was not opened, check if we should enter a long position.
         if self.__sma[-1] is None:
             return
@@ -181,8 +210,9 @@ class SMACrossOver(strategy.BacktestingStrategy):
 
 def runAllStrat(m, k):
     instrument = "garan"
+    barperiod = 1
     feed = Feed()
-    feed.addBarsFromCSV(instrument, "gran.csv", m)
+    feed.addBarsFromCSV(instrument, "gran.csv", m, barperiod)
     strat = SMACrossOver(feed, instrument, k)
     strat.getBroker().setCommission(backtesting.TradePercentage(0.0003))
 
@@ -201,7 +231,7 @@ def main():
     nticks = range(5, 100 + 1, 1)
     nsma = range(100, 500 + 1, 5)
     # data = Parallel(n_jobs=16)(delayed(runAllStrat)(m=i, k=j) for i in nticks for j in nsma)
-    data = Parallel(n_jobs=1)(delayed(runAllStrat)(m=i, k=j) for i in range(80, 81, 1) for j in range(100, 101, 1))
+    data = Parallel(n_jobs=1)(delayed(runAllStrat)(m=i, k=j) for i in range(1, 2, 1) for j in range(100, 101, 1))
 
     data = np.matrix(data)
     nrow = len(nticks)
