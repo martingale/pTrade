@@ -14,8 +14,8 @@ myVal = ast.literal_eval(test.text)
 print (myVal)
 
 
-secret = 'CgeKhF7zf2hccD2o5bNZPNJCKFMis8O6gHqKrRmPkxD'
-api_key = 'NWAnC6UF2CI9PlHL5JIuztZ1juaVEKnniop5uzvXWF9'
+secret = ''
+api_key = ''
 
 nonce = str(int(time.time() * 10000000))
 auth_string = 'AUTH' + nonce
