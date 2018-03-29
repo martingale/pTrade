@@ -102,7 +102,7 @@ class HADir(technical.EventBasedFilter):
     """
 
     def __init__(self, barDataSeries, period, useAdjustedValues=False, maxLen=None):
-        if not isinstance(barDataSeries, bards.BarDataSeries):
-            raise Exception("barDataSeries must be a dataseries.bards.BarDataSeries instance")
+        # if not isinstance(barDataSeries, bards.BarDataSeries):
+        #     raise Exception("barDataSeries must be a dataseries.bards.BarDataSeries instance")
 
         super(HADir, self).__init__(barDataSeries, HADirEventWindow(period, useAdjustedValues), maxLen)

@@ -93,9 +93,10 @@ class GenkiStrategy(strategy.BacktestingStrategy):
         self.__genki = instrument + 'genki'
         self.__prices = feed[instrument]
         self.__resampledBF = self.resampleBarFeed(bar.Frequency.MONTH, self.onResampledBars)
-        self.__ha = feed[self.__genki]
-        self.__min_ha = ha.HADir(self.__ha, min_compare_bars)
-        self.__max_ha = ha.HADir(self.__ha, max_compare_bars)
+        self.__resampled_price = self.__resampledBF.getDataSeries()
+        self.__resampled_bars = self.__resampledBF.getDataSeries().getCloseDataSeries()
+        self.__min_ha = ha.HADir(self.__resampled_price, min_compare_bars)
+        self.__max_ha = ha.HADir(self.__resampled_price, max_compare_bars)
         self.__merged_dir = []
         self.__sma = ma.SMA(self.__prices.getPriceDataSeries(), 14)
         self._longposition = None
@@ -225,115 +226,121 @@ class GenkiStrategy(strategy.BacktestingStrategy):
         self.info('RESAMPLED ' + str(bar.getDateTime()) +' ' + '%.2f' % bar.getClose())
 
     def onBars(self, bars):
-        trailing_stop = 0.05
-        bar = bars[self.__instrument]
-        barG = bars[self.__genki]
-
-        if self.__min_ha[-1][0] is None and self.__max_ha[-1][0] is None:
-            return
-        elif self.__max_ha[-1][0] is None:
-            self.__merged_dir.append(self.__min_ha[-1][0])
-        else:
-            comb_index = self.__max_ha[-1][1]
-            if comb_index == 0:
-                self.__merged_dir.append(self.__max_ha[-1][0])
+        self.info('%.2f' % bars[self.__instrument].getClose())
+        if self.__min_ha and self.__max_ha:
+            if self.__min_ha[-1][0] is None and self.__max_ha[-1][0] is None:
+                return
             else:
-                combDir = self.__merged_dir[-comb_index]
-                if combDir == self.__max_ha[-1][0]:
-                    self.__merged_dir.append(self.__max_ha[-1][0])
-                else:
-                    self.__merged_dir.append(0)
+                pass
+                # print self.__min_ha[-1][0], self.__max_ha[-1][0]
+        # trailing_stop = 0.05
+        # bar = bars[self.__instrument]
+        # barG = bars[self.__genki]
+        #
+        # if self.__min_ha[-1][0] is None and self.__max_ha[-1][0] is None:
+        #     return
+        # elif self.__max_ha[-1][0] is None:
+        #     self.__merged_dir.append(self.__min_ha[-1][0])
+        # else:
+        #     comb_index = self.__max_ha[-1][1]
+        #     if comb_index == 0:
+        #         self.__merged_dir.append(self.__max_ha[-1][0])
+        #     else:
+        #         combDir = self.__merged_dir[-comb_index]
+        #         if combDir == self.__max_ha[-1][0]:
+        #             self.__merged_dir.append(self.__max_ha[-1][0])
+        #         else:
+        #             self.__merged_dir.append(0)
 
-
-        state = 0
-        if self.enterLongSignal():
-            state = 1
-        elif self.enterShortSignal():
-            state = -1
-
-        self.__price = bars[self.__instrument].getPrice()
-        # price change i max ve min fiyat bazli hesapla
-        price_change = self.__price - self.__price_old
-        self.__price_old = self.__price
-        # shares = int(50000 / self.__price)
-        shares = 500
-
-        myshares = self.getBroker().getShares(self.__instrument)
-
-        self.info((str(barG.getDateTime()) + ', ' + "%.2f" % barG.getOpen() + ', ' + "%.2f" % barG.getClose() +
-                   ', ' + str(state) + ',' + str(self.__merged_dir[-1]) + ', ' + str(self.__min_ha[-1]) +
-                   str(self.__max_ha[-1]) + "%.2f" % bar.getOpen() + ' ' + "%.2f" % bar.getClose())
-                  + ' ' + "%.2f" % price_change + ' ' + str(myshares))
-
-
-        order = self.getBroker().getActiveOrders()
-        # self.info(str(len(order)))
-        if order:
-            order = order[0]
-            # print 'debug'
-            if not order.isFilled() and order.getType() == 3 and order.isActive():
-                stopLossOrder = order
-                if bar.getHigh() > self.__higestPrice:
-                    shares = order.getQuantity()
-                    self.getBroker().cancelOrder(order)
-
-                    self.__higestPrice = self.__price
-                    stopLossPrice = self.__higestPrice * 0.95
-                    self.info('update trailing stop price at ' + "%.2f" % stopLossPrice)
-
-                    self._stopLossOrder = self.getBroker().createStopOrder(broker.Order.Action.SELL, self.__instrument,
-                                                                           stopLossPrice, shares)
-                    self._stopLossOrder.setGoodTillCanceled(True)
-                    self.getBroker().submitOrder(self._stopLossOrder)
-                else:
-                    self.info('no need to update trailing stop price')
-
-        if self._longposition is None and self._shortposition is None:
-            if self.enterLongSignal():
-                self.info(bar.getDateTime())
-                self._longposition = self.enterLong(self.__instrument, shares, True)
-            elif self.enterShortSignal():
-                self.info(bar.getDateTime())
-                # self._shortposition = self.enterShort(self.__instrument, shares, True)
-
-        elif self._longposition is None and self._shortposition is not None:
-            if self.enterLongSignal():
-                self.info(bar.getDateTime())
-                if not self._shortposition.exitActive() and self._shortposition.getShares() != 0:
-                    self._shortposition.exitMarket()
-                self._longposition = self.enterLong(self.__instrument, shares, True)
-            # else:
-            #     # trailing stop part for short positions
-            #     if not self._shortposition.exitActive() and price_change < 0:
-            #         if self.__stopLossOrder is not None:
-            #             # entryPrice = order.getExecutionInfo().getPrice()
-            #             print self.getFeed().getCurrentBars().getDateTime(), "Stop loss order filled at", entryPrice
-            #             self.__stopLossOrder = None
-            #             # Cancel the other exit order to avoid entering a short position.
-            #             self.getBroker().cancelOrder(self.__takeProfitOrder)
-            #
-            #         shares = self._shortposition.getEntryOrder().getQuantity()
-            #         self.__stopLossOrder = self.getBroker().createStopOrder(broker.Order.Action.BUY_TO_COVER,
-            #                                                                 self.__instrument, (1 + trailing_stop),
-            #                                                                 shares)
-            #         self.__stopLossOrder.setGoodTillCanceled(True)
-            #         self.getBroker().submitOrder(self.__stopLossOrder)
-
-        elif self._shortposition is None and self._longposition is not None:
-            if self.enterShortSignal():
-                self.info(bar.getDateTime())
-                if not self._longposition.exitActive() and self._longposition.getShares() != 0:
-                    self.info('Signal Exit')
-                    self.getBroker().cancelOrder(self._stopLossOrder)
-                    self._longposition.exitMarket()
-                # self._shortposition = self.enterShort(self.__instrument, shares, True)
-            # else:
-            #     # trailing stop part for long positions
-            #     if not self._longposition.exitActive() and price_change > 0:
-            #         active_orders = self.getBroker().getActiveOrders()
-            #         if active_orders:
-            #             self.getBroker().cancelOrder(active_orders[-1])
-            #         self._longposition = self._longposition.exitStop((1 - trailing_stop) * self.__price, True)
+        # state = 0
+        # if self.enterLongSignal():
+        #     state = 1
+        # elif self.enterShortSignal():
+        #     state = -1
+        #
+        # self.__price = bars[self.__instrument].getPrice()
+        # # price change i max ve min fiyat bazli hesapla
+        # price_change = self.__price - self.__price_old
+        # self.__price_old = self.__price
+        # # shares = int(50000 / self.__price)
+        # shares = 500
+        #
+        # myshares = self.getBroker().getShares(self.__instrument)
+        #
+        # self.info((str(barG.getDateTime()) + ', ' + "%.2f" % barG.getOpen() + ', ' + "%.2f" % barG.getClose() +
+        #            ', ' + str(state) + ',' + str(self.__merged_dir[-1]) + ', ' + str(self.__min_ha[-1]) +
+        #            str(self.__max_ha[-1]) + "%.2f" % bar.getOpen() + ' ' + "%.2f" % bar.getClose())
+        #           + ' ' + "%.2f" % price_change + ' ' + str(myshares))
+        #
+        #
+        # order = self.getBroker().getActiveOrders()
+        # # self.info(str(len(order)))
+        # if order:
+        #     order = order[0]
+        #     # print 'debug'
+        #     if not order.isFilled() and order.getType() == 3 and order.isActive():
+        #         stopLossOrder = order
+        #         if bar.getHigh() > self.__higestPrice:
+        #             shares = order.getQuantity()
+        #             self.getBroker().cancelOrder(order)
+        #
+        #             self.__higestPrice = self.__price
+        #             stopLossPrice = self.__higestPrice * 0.95
+        #             self.info('update trailing stop price at ' + "%.2f" % stopLossPrice)
+        #
+        #             self._stopLossOrder = self.getBroker().createStopOrder(broker.Order.Action.SELL, self.__instrument,
+        #                                                                    stopLossPrice, shares)
+        #             self._stopLossOrder.setGoodTillCanceled(True)
+        #             self.getBroker().submitOrder(self._stopLossOrder)
+        #         else:
+        #             self.info('no need to update trailing stop price')
+        #
+        # if self._longposition is None and self._shortposition is None:
+        #     if self.enterLongSignal():
+        #         self.info(bar.getDateTime())
+        #         self._longposition = self.enterLong(self.__instrument, shares, True)
+        #     elif self.enterShortSignal():
+        #         self.info(bar.getDateTime())
+        #         # self._shortposition = self.enterShort(self.__instrument, shares, True)
+        #
+        # elif self._longposition is None and self._shortposition is not None:
+        #     if self.enterLongSignal():
+        #         self.info(bar.getDateTime())
+        #         if not self._shortposition.exitActive() and self._shortposition.getShares() != 0:
+        #             self._shortposition.exitMarket()
+        #         self._longposition = self.enterLong(self.__instrument, shares, True)
+        #     # else:
+        #     #     # trailing stop part for short positions
+        #     #     if not self._shortposition.exitActive() and price_change < 0:
+        #     #         if self.__stopLossOrder is not None:
+        #     #             # entryPrice = order.getExecutionInfo().getPrice()
+        #     #             print self.getFeed().getCurrentBars().getDateTime(), "Stop loss order filled at", entryPrice
+        #     #             self.__stopLossOrder = None
+        #     #             # Cancel the other exit order to avoid entering a short position.
+        #     #             self.getBroker().cancelOrder(self.__takeProfitOrder)
+        #     #
+        #     #         shares = self._shortposition.getEntryOrder().getQuantity()
+        #     #         self.__stopLossOrder = self.getBroker().createStopOrder(broker.Order.Action.BUY_TO_COVER,
+        #     #                                                                 self.__instrument, (1 + trailing_stop),
+        #     #                                                                 shares)
+        #     #         self.__stopLossOrder.setGoodTillCanceled(True)
+        #     #         self.getBroker().submitOrder(self.__stopLossOrder)
+        #
+        # elif self._shortposition is None and self._longposition is not None:
+        #     if self.enterShortSignal():
+        #         self.info(bar.getDateTime())
+        #         if not self._longposition.exitActive() and self._longposition.getShares() != 0:
+        #             self.info('Signal Exit')
+        #             self.getBroker().cancelOrder(self._stopLossOrder)
+        #             self._longposition.exitMarket()
+        #         # self._shortposition = self.enterShort(self.__instrument, shares, True)
+        #     # else:
+        #     #     # trailing stop part for long positions
+        #     #     if not self._longposition.exitActive() and price_change > 0:
+        #     #         active_orders = self.getBroker().getActiveOrders()
+        #     #         if active_orders:
+        #     #             self.getBroker().cancelOrder(active_orders[-1])
+        #     #         self._longposition = self._longposition.exitStop((1 - trailing_stop) * self.__price, True)
 
 
 
