@@ -9,6 +9,7 @@ class HADirEventWindow():
         self.__useAdjustedValues = useAdjustedValues
         self.__prevClose = None
         self.__value = [None, None]
+        self.__prev_values = []
         self.__n = 0
         self.__op = []
         self.__cl = []
@@ -30,20 +31,44 @@ class HADirEventWindow():
 
         if value is not None and self.__open.windowFull() and self.__close.windowFull():
             if self.__period > 1:
-                for i in range(2, self.__period+1):
-                    open_values = self.__open.getValues()[-i:-1]
-                    close_values = self.__close.getValues()[-i:-1]
+                # for i in range(2, self.__period + 1): # nearest bar
+                for i in range(self.__period, 1, -1): # farthest bar
+                    # Look for range
+                    # open_values = self.__open.getValues()[-i:-1]
+                    # close_values = self.__close.getValues()[-i:-1]
+                    # Look for one bar
                     open_values = self.__open.getValues()[-i:-(i-1)]
                     close_values = self.__close.getValues()[-i:-(i-1)]
+                    prev_values = self.__prev_values[-i:-(i-1)]
                     values = np.append(open_values, close_values)
                     max_val = max(values)
                     min_val = min(values)
 
+                    # if op >= min_val and op <= max_val and cl >= min_val and cl <= max_val:
+                    #     if close_values[0] > open_values[0]:
+                    #         self.__value = [1, i-1]
+                    #         self.__prev_values.append(1)
+                    #     else:
+                    #         self.__value = [-1, i-1]
+                    #         self.__prev_values.append(-1)
+                    #     # self.__value = [prev_values[0], i-1]
+                    #     # self.__prev_values.append(self.__value[0])
+                    #     break
+                    # else:
+                    #     if cl > op:
+                    #         self.__value = [1, 0]
+                    #         self.__prev_values.append(1)
+                    #     else:
+                    #         self.__value = [-1, 0]
+                    #         self.__prev_values.append(1)
+
                     if op >= min_val and op <= max_val and cl >= min_val and cl <= max_val:
-                        if close_values[0] > open_values[0]:
+                        if cl > op:
                             self.__value = [1, i-1]
                         else:
                             self.__value = [-1, i-1]
+                        # self.__value = [prev_values[0], i-1]
+                        # self.__prev_values.append(self.__value[0])
                         break
                     else:
                         if cl > op:
