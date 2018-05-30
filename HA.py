@@ -124,7 +124,7 @@ class HADirEventWindow():
         #         else:
         #             self.__value = [-1, 0, ha_open, ha_high, ha_low, ha_close]
 
-        if BMonthEnd().rollforward(extra) == extra and self.__prev_datetime is not None:
+        if BMonthEnd().rollforward(extra).date() == extra.date() and str(extra.time()) == '23:00:00' and self.__prev_datetime is not None:
             self.month_openDS.onNewValue(dateTime, self.openDS.getValues()[-1], lastFlag)
             self.month_closeDS.onNewValue(dateTime, self.closeDS.getValues()[-1], lastFlag)
 
